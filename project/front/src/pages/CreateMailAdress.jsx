@@ -2,6 +2,10 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
+// Compute API base dynamically. Prefer VITE_API_URL from env (set per-deployment)
+// Fallback: same host as the frontend on port 5000.
+const API_URL = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:5000`;
+
 export default function CreateMailAddress() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -36,8 +40,8 @@ export default function CreateMailAddress() {
     if (validate()) {
       try {
         const token = localStorage.getItem('token');
-        const response = await axios.post(
-          'http://193.135.137.144:5000/emails',
+        await axios.post(
+          `${API_URL}/emails`,
           {
             temp: [email, service, serviceUrl, signature]
           },
@@ -79,7 +83,7 @@ export default function CreateMailAddress() {
                 }}
                 onClick={async () => {
                   try {
-                    const response = await axios.get('http://193.135.137.144:5000/gen');
+                    const response = await axios.get(`${API_URL}/gen`);
                     setEmail(response.data.email);
                     setSignature(response.data.signature);
                   } catch (err) {

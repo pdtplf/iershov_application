@@ -1,1 +1,4 @@
 .obsidian/
+project/venv/
+project/.env
+project/__pycache__/

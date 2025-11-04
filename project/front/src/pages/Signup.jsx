@@ -2,6 +2,8 @@ import { useState } from 'react';
 import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
 
+const API_URL = `${window.location.protocol}//${window.location.hostname}:5000`;
+
 export default function Signup() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -17,7 +19,7 @@ export default function Signup() {
     setLoading(true);
 
     try {
-      const response = await axios.post('http://193.135.137.144:5000/register', {
+      const response = await axios.post(`${API_URL}/register`, {
         name, 
         email, 
         password,
@@ -26,7 +28,7 @@ export default function Signup() {
       if (response.status !== 201) {
         throw new Error('Failed to sign up');
       }
-      const log_resp = await axios.post('http://193.135.137.144:5000/login', {
+      const log_resp = await axios.post(`${API_URL}/login`, {
         email,
         password,
       });
@@ -70,7 +72,7 @@ export default function Signup() {
 
   const sendConfirmationCode = async () => {
     try {
-      await axios.post('http://193.135.137.144:5000/send-confirmation-code', { email });
+      await axios.post(`${API_URL}/send-confirmation-code`, { email });
       setShowConfirmationField(true);
       setError('');
     } catch (err) {
@@ -81,7 +83,7 @@ export default function Signup() {
 
   const verifyConfirmationCode = async () => {
     try {
-      const response = await axios.post('http://193.135.137.144:5000/verify-confirmation-code', {
+      const response = await axios.post(`${API_URL}/verify-confirmation-code`, {
         email,
         code: confirmationCode,
       });

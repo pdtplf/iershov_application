@@ -1,8 +1,10 @@
 // src/api.js
 import axios from 'axios';
 
+const API_URL = `${window.location.protocol}//${window.location.hostname}:5000`;
+
 const api = axios.create({
-  baseURL: 'http://193.135.137.144:5000/',
+  baseURL: `${API_URL}`,
   headers: {
     'Content-Type': 'application/json'
   }

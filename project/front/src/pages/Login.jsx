@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 
+const API_URL = `${window.location.protocol}//${window.location.hostname}:5000`;
+
 export default function Login() {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
@@ -13,7 +15,7 @@ export default function Login() {
     setError('') // Clear any previous errors
 
     try {
-      const response = await axios.post('http://193.135.137.144:5000/login', {
+      const response = await axios.post(`${API_URL}/login`, {
         email,
         password,
       })
