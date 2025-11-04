@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
-// Compute API base dynamically. Prefer VITE_API_URL from env (set per-deployment)
-// Fallback: same host as the frontend on port 5000.
-const API_URL = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:5000`;
+// Compute API base dynamically so we don't hardcode the server IP.
+// This assumes your backend listens on port 5000 of the same host.
+// Alternative: set VITE_API_URL in an env file and use import.meta.env.VITE_API_URL
+const API_URL = `${window.location.protocol}//${window.location.hostname}:5000`;
 
 export default function CreateMailAddress() {
   const navigate = useNavigate();
