@@ -3,7 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from models import db, User, Email, Deactivated
 from passlib.hash import bcrypt
 from dotenv import load_dotenv
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 import os
 import jwt
 from datetime import datetime, timedelta
@@ -15,7 +15,9 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 
-CORS(app, resources={r"/*": {"origins": "*"}})
+# Enable CORS and explicitly allow the Authorization header used by the frontend
+app.config['CORS_HEADERS'] = 'Content-Type,Authorization'
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True, allow_headers=['Content-Type', 'Authorization'])
 
 # Создание таблиц при первом запуске
 with app.app_context():
@@ -182,6 +184,50 @@ def get_main_email():
     email_list = {"main": main_email}
 
     return jsonify(email_list), 200
+
+
+@app.route('/change-email', methods=['POST'])
+def change_email():
+    """Change the authenticated user's main email.
+
+    Expects JSON: { "email": "new@example.com" }
+    Requires Authorization: Bearer <token> header. Only updates the user's
+    email field after verifying the JWT; returns 200 on success.
+    """
+    token = request.headers.get('Authorization')
+    if token and token.startswith("Bearer "):
+        token = token.split(" ")[1]
+
+    if not token:
+        return jsonify({"error": "Token is missing"}), 401
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        user_uuid = payload['uuid']
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token has expired"}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Invalid token"}), 401
+
+    user = User.query.get(user_uuid)
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json() or {}
+    new_email = data.get('email')
+    if not new_email or not isinstance(new_email, str):
+        return jsonify({"error": "Invalid payload. Expecting key 'email' with new address."}), 400
+
+    # Minimal normalization
+    new_email = new_email.strip()
+
+    try:
+        user.email = new_email
+        db.session.commit()
+        return jsonify({"message": "Email changed", "email": new_email}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 
 # Добавление email (требует аутентификации через JWT)
@@ -514,6 +560,46 @@ def generate():
     signature = hmac.new(SECRET_KEY.encode(), random_letters.encode(), hashlib.sha256).hexdigest()
     print(signature)
     return jsonify({"email": random_letters, "signature": signature})
+
+
+@app.route('/delete-account', methods=['DELETE', 'OPTIONS'])
+@cross_origin(headers=['Content-Type', 'Authorization'])
+def delete_account():
+    """Delete the authenticated user's account and related data.
+
+    Requires Authorization: Bearer <token> header containing a valid JWT.
+    Deletes Email and Deactivated records for the user, then deletes the User.
+    """
+    token = request.headers.get('Authorization')
+    if token and token.startswith("Bearer "):
+        token = token.split(" ")[1]
+
+    if not token:
+        return jsonify({"error": "Token is missing"}), 401
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        user_uuid = payload['uuid']
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token has expired"}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Invalid token"}), 401
+
+    user = User.query.get(user_uuid)
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    try:
+        # Delete related rows first (safe even if cascade exists)
+        Email.query.filter_by(user_id=user.uuid).delete(synchronize_session=False)
+        Deactivated.query.filter_by(user_id=user.uuid).delete(synchronize_session=False)
+        # Delete the user
+        db.session.delete(user)
+        db.session.commit()
+        return jsonify({"message": "Account deleted"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 from flask_mail import Mail, Message
 from flask_caching import Cache

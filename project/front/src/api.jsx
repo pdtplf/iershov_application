@@ -96,3 +96,50 @@ export async function activateEmail(token, payload) {
     throw error;
   }
 }
+
+export async function deleteAccount(token) {
+  try {
+    const t = token || localStorage.getItem('token');
+    const response = await api.delete('/delete-account', {
+      headers: { 'Authorization': `Bearer ${t}` }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error deleting account:', error);
+    throw error;
+  }
+}
+
+// Confirmation / change-email helpers
+export async function sendConfirmationCode(email) {
+  try {
+    const response = await api.post('/send-confirmation-code', { email });
+    return response.data;
+  } catch (error) {
+    console.error('Error sending confirmation code:', error);
+    throw error;
+  }
+}
+
+export async function verifyConfirmationCode(email, code) {
+  try {
+    const response = await api.post('/verify-confirmation-code', { email, code });
+    return response.data;
+  } catch (error) {
+    console.error('Error verifying confirmation code:', error);
+    throw error;
+  }
+}
+
+export async function changeMainEmail(token, newEmail) {
+  try {
+    const t = token || localStorage.getItem('token');
+    const response = await api.post('/change-email', { email: newEmail }, {
+      headers: { 'Authorization': `Bearer ${t}` }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error changing main email:', error);
+    throw error;
+  }
+}

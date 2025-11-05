@@ -5,8 +5,8 @@ import Signup from './pages/Signup'
 import Dashboard from './pages/Dashboard'
 import CreateMailAdress from './pages/CreateMailAdress'
 import DeactivatedPage from './pages/Deactivated'
-import Activate from './pages/Activate'
-
+import ChangeEmail from './pages/changeEmail'
+import Help from './pages/help'
 export default function App() {
   return (
     <BrowserRouter>
@@ -17,7 +17,9 @@ export default function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/create" element={<CreateMailAdress />} />
         <Route path="/deactivated" element={<DeactivatedPage />} />
-        <Route path="/activate" element={<Activate />} />
+        <Route path="/change-email" element={<ChangeEmail />} />
+        <Route path="/help" element={<Help />} />
+        
       </Routes>
     </BrowserRouter>
   )

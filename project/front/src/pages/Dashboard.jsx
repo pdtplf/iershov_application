@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchEmails, fetchMain, deactivateEmail } from '../api.jsx';
+import { fetchEmails, fetchMain, deactivateEmail, deleteAccount } from '../api.jsx';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -86,10 +86,23 @@ export default function Dashboard() {
             {menuOpen && (
               <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', background: 'white', border: '1px solid #ddd', borderRadius: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', zIndex: 50 }}>
                 <button onClick={() => { setMenuOpen(false); navigate('/help'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Помощь</button>
-                <button onClick={() => { setMenuOpen(false); navigate('/active'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Активные адреса</button>
+                <button onClick={() => { setMenuOpen(false); navigate('/dashboard'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Активные адреса</button>
                 <button onClick={() => { setMenuOpen(false); navigate('/deactivated'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Отключенные адреса</button>
-                <button onClick={() => { setMenuOpen(false); navigate('/change-main'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Сменить основную почту</button>
-                <button onClick={() => { setMenuOpen(false); navigate('/delete-account'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', color: 'red' }}>Удалить аккаунт</button>
+                <button onClick={() => { setMenuOpen(false); navigate('/change-email'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Сменить основную почту</button>
+                <button onClick={async () => {
+                    setMenuOpen(false);
+                    const confirmed = window.confirm('Вы уверены, что хотите удалить аккаунт? Это действие необратимо.');
+                    if (!confirmed) return;
+                    try {
+                      const token = localStorage.getItem('token');
+                      await deleteAccount(token);
+                      localStorage.removeItem('token');
+                      navigate('/login');
+                    } catch (err) {
+                      console.error('Failed to delete account', err);
+                      window.alert('Не удалось удалить аккаунт. Попробуйте снова.');
+                    }
+                  }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', color: 'red' }}>Удалить аккаунт</button>
               </div>
             )}
           </div>
