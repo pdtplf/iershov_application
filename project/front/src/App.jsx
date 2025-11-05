@@ -4,6 +4,8 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Dashboard from './pages/Dashboard'
 import CreateMailAdress from './pages/CreateMailAdress'
+import DeactivatedPage from './pages/Deactivated'
+import Activate from './pages/Activate'
 
 export default function App() {
   return (
@@ -14,6 +16,8 @@ export default function App() {
         <Route path="/signup" element={<Signup />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/create" element={<CreateMailAdress />} />
+        <Route path="/deactivated" element={<DeactivatedPage />} />
+        <Route path="/activate" element={<Activate />} />
       </Routes>
     </BrowserRouter>
   )

@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from models import db, User, Email
+from models import db, User, Email, Deactivated
 from passlib.hash import bcrypt
 from dotenv import load_dotenv
 from flask_cors import CORS
@@ -94,13 +94,21 @@ def add_email():
         return jsonify({"error": "Unauthorized"}), 401
     data = request.get_json()
     print(data)
-    if not verify_email(data.get('temp')[0], data.get('temp')[3]):
-        return jsonify({"error": "Email verification failed"}), 400
-    if not isinstance(data.get('temp'), list) or not all(isinstance(item, str) for item in data['temp']):
-        return jsonify({"error": "Invalid data format. 'temp' must be a one-dimensional array of strings."}), 400
+    if not data or 'data' not in data:
+        return jsonify({"error": "Invalid payload. Expecting key 'data' with email array."}), 400
+    if not isinstance(data.get('data'), list) or not all(isinstance(item, str) for item in data['data']):
+        return jsonify({"error": "Invalid data format. 'data' must be a one-dimensional array of strings."}), 400
+
+    # Verify signature if present (index 3)
+    try:
+        if not verify_email(data.get('data')[0], data.get('data')[3]):
+            return jsonify({"error": "Email verification failed"}), 400
+    except Exception:
+        # if signature not present or verify fails due to structure, continue to error above
+        return jsonify({"error": "Email verification failed or malformed data"}), 400
 
     email = Email(
-        temp_emails=data.get('temp', []),
+        data=data.get('data', []),
         user_id=user.uuid
     )
 
@@ -142,12 +150,12 @@ def get_emails():
         return jsonify({"error": "Unauthorized"}), 401
 
     emails = Email.query.filter_by(user_id=user.uuid).all()
-    email_list = [{"temp": email.temp_emails} for email in emails]
+    email_list = [{"uuid": str(email.uuid), "data": email.data} for email in emails]
 
-    return jsonify(email_list), 200
+    return jsonify({"emails": email_list}), 200
 
 
-# Получение списка использованных email
+# Получение главного email
 @app.route('/main', methods=['GET'])
 def get_main_email():
     token = request.headers.get('Authorization')
@@ -175,6 +183,321 @@ def get_main_email():
 
     return jsonify(email_list), 200
 
+
+# Добавление email (требует аутентификации через JWT)
+@app.route('/deactivate', methods=['POST'])
+def deactivate_email():
+    """Deactivate an email alias for the authenticated user.
+
+    Expects JSON: { "data": "localpart" }
+
+    Authentication: looks for JWT in cookie named 'token', falling back to
+    Authorization: Bearer <token> header. Verifies the token, ensures the
+    email belongs to the authenticated user, then creates a Deactivated record
+    and removes the original Email rows for that user/email.
+    """
+    token = request.headers.get('Authorization')
+    if token and token.startswith("Bearer "):
+        token = token.split(" ")[1]
+
+    if not token:
+        return jsonify({"error": "Token is missing"}), 401
+
+    try:
+        # Декодируем токен
+        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        user_uuid = payload['uuid']
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token has expired"}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Invalid token"}), 401
+
+    user = User.query.get(user_uuid)
+    print("USER AND USER ID: ")
+    print(user)
+    print(user_uuid)
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    payload = request.get_json() or {}
+    print(payload)
+
+    # Accept either full 'data' (array/dict) or legacy 'email' string
+    entry = None
+    email_local = None
+    if 'data' in payload:
+        entry = payload.get('data')
+        # determine local-part from entry
+        if isinstance(entry, list) and len(entry) > 0:
+            email_local = str(entry[0]).lower()
+        elif isinstance(entry, dict):
+            email_local = str(entry.get('email') or entry.get('local') or '').lower()
+        else:
+            return jsonify({"error": "Invalid data format. 'data' must be an array or object."}), 400
+    else:
+        return jsonify({"error": "Invalid payload. Provide 'data' or 'email'."}), 400
+
+    # Find the Email row that belongs to this user and matches the given local-part or exact data
+    user_emails = Email.query.filter_by(user_id=user.uuid).all()
+    target = None
+    for e in user_emails:
+        try:
+            temp = e.data[0]
+            if temp == email_local:
+                target = e
+        except Exception:
+            continue
+
+    if not target:
+        return jsonify({"error": "Email not found or does not belong to the user"}), 404
+
+    # Create Deactivated record (store full email data as JSONB)
+    try:
+        # prefer caller-provided entry (from payload) but fall back to the Email row's stored data
+        if entry is None:
+            entry = target.temp_emails
+
+        # Avoid duplicate deactivated entries by checking stored data
+        already = None
+        existing = Deactivated.query.filter_by(user_id=user.uuid).all()
+        for r in existing:
+            try:
+                ddata = r.data
+                if isinstance(ddata, list) and len(ddata) > 0 and str(ddata[0]).lower() == email_local:
+                    already = r
+                    break
+                if isinstance(ddata, dict) and (str(ddata.get('email','')).lower() == email_local or str(ddata.get('local','')).lower() == email_local):
+                    already = r
+                    break
+            except Exception:
+                continue
+
+        if already:
+            # still delete the original Email row if present
+            db.session.delete(target)
+            db.session.commit()
+            return jsonify({"message": "Email already deactivated"}), 200
+
+        d = Deactivated(data=entry, user_id=user.uuid)
+        db.session.add(d)
+        # remove the Email row from emails table
+        db.session.delete(target)
+        db.session.commit()
+        return jsonify({"message": "Email deactivated"}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/deactivated', methods=['GET'])
+def get_deactivated_emails():
+    token = request.headers.get('Authorization')
+    if token and token.startswith("Bearer "):
+        token = token.split(" ")[1]
+
+    if not token:
+        return jsonify({"error": "Token is missing"}), 401
+
+    try:
+        # Декодируем токен
+        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        user_uuid = payload['uuid']
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token has expired"}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Invalid token"}), 401
+
+    user = User.query.get(user_uuid)
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    deactivated_rows = Deactivated.query.filter_by(user_id=user.uuid).all()
+    # return stored data along with uuid for each deactivated entry (no created_at)
+    email_list = []
+    for d in deactivated_rows:
+        item = {
+            "uuid": str(d.uuid),
+            "data": d.data,
+        }
+        email_list.append(item)
+
+    return jsonify(email_list), 200
+
+
+@app.route('/activate', methods=['POST'])
+def activate_email():
+    """Activate an email previously deactivated.
+
+    Expects JSON: { "email": "localpart" , "service": "optional service name", "serviceUrl": "optional" }
+    Auth via Authorization: Bearer <token> header.
+    """
+    token = request.headers.get('Authorization')
+    if token and token.startswith("Bearer "):
+        token = token.split(" ")[1]
+
+    if not token:
+        return jsonify({"error": "Token is missing"}), 401
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        user_uuid = payload['uuid']
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token has expired"}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Invalid token"}), 401
+
+    user = User.query.get(user_uuid)
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payload = request.get_json() or {}
+    # Require full data array in payload (no legacy 'email' support)
+    if 'data' not in payload or not isinstance(payload.get('data'), list):
+        return jsonify({"error": "Invalid payload. Expecting key 'data' with email array."}), 400
+
+    entry = payload.get('data')
+    # extract local-part
+    if not entry or not isinstance(entry, list) or len(entry) == 0:
+        return jsonify({"error": "Invalid data array."}), 400
+    email_local = str(entry[0]).lower()
+
+    # Find the Deactivated row that exactly matches this data for the user
+    drow = None
+    deactivated_rows = Deactivated.query.filter_by(user_id=user.uuid).all()
+    for d in deactivated_rows:
+        try:
+            if d.data == entry:
+                drow = d
+                break
+        except Exception:
+            continue
+
+    if not drow:
+        return jsonify({"error": "Deactivated entry not found for this data"}), 404
+
+    # Prevent adding duplicate active email by local-part
+    existing_emails = Email.query.filter_by(user_id=user.uuid).all()
+    for e in existing_emails:
+        try:
+            temp = e.data
+            if isinstance(temp, list) and len(temp) > 0 and str(temp[0]).lower() == email_local:
+                return jsonify({"error": "Email already active"}), 400
+        except Exception:
+            continue
+
+    # Use provided entry as-is when creating the active Email record
+    try:
+        new_email = Email(data=entry, user_id=user.uuid)
+        db.session.add(new_email)
+        # remove deactivated row
+        db.session.delete(drow)
+        db.session.commit()
+        return jsonify({"message": "Email activated", "data": entry}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+'''
+@app.route('/deactivate', methods=['POST'])
+def deactivate_email():
+    """Deactivate an email alias for the authenticated user.
+
+    Expects JSON: { "email": "localpart" }
+
+    Authentication: looks for JWT in cookie named 'token', falling back to
+    Authorization: Bearer <token> header. Verifies the token, ensures the
+    email belongs to the authenticated user, then creates a Deactivated record
+    and removes the original Email rows for that user/email.
+    """
+    # Accept token from cookie first, then Authorization header
+    token = request.cookies.get('token')
+    if not token:
+        token_hdr = request.headers.get('Authorization')
+        if token_hdr and token_hdr.startswith('Bearer '):
+            token = token_hdr.split(' ')[1]
+
+    if not token:
+        return jsonify({"error": "Token is missing"}), 401
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        user_uuid = payload['uuid']
+    except jwt.ExpiredSignatureError:
+        return jsonify({"error": "Token has expired"}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({"error": "Invalid token"}), 401
+
+    user = User.query.get(user_uuid)
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json() or {}
+    raw_email = data.get('email')
+    if not raw_email:
+        return jsonify({"error": "Email is required"}), 400
+
+    # Normalize input: accept either full address or local-part
+    raw_email = str(raw_email).strip()
+    if '@' in raw_email:
+        email_local = raw_email.split('@', 1)[0].lower()
+    else:
+        email_local = raw_email.lower()
+
+    # Find the first Email row that belongs to this user and matches the local-part
+    user_emails = Email.query.filter_by(user_id=user.uuid).all()
+    target = None
+    for e in user_emails:
+        try:
+            temp = e.temp_emails
+            # temp expected as list where temp[0] is local-part, or as dict with keys 'email'/'local'
+            if isinstance(temp, list) and len(temp) > 0 and str(temp[0]).lower() == email_local:
+                target = e
+                break
+            if isinstance(temp, dict) and (str(temp.get('email', '')).lower() == email_local or str(temp.get('local', '')).lower() == email_local):
+                target = e
+                break
+        except Exception:
+            continue
+
+    if not target:
+        return jsonify({"error": "Email not found or does not belong to the user"}), 404
+
+    try:
+        entry = target.temp_emails
+
+        # Get or create the user's Deactivated row (one row per user)
+        d = Deactivated.query.filter_by(user_id=user.uuid).first()
+        if not d:
+            d = Deactivated(deactivated_emails=[entry], user_id=user.uuid)
+            db.session.add(d)
+        else:
+            if not isinstance(d.deactivated_emails, list):
+                d.deactivated_emails = [] if d.deactivated_emails is None else [d.deactivated_emails]
+
+            # Avoid duplicates (case-insensitive compare on local-part)
+            exists = False
+            for existing in d.deactivated_emails:
+                try:
+                    if isinstance(existing, list) and isinstance(entry, list) and len(existing) > 0 and len(entry) > 0 and str(existing[0]).lower() == str(entry[0]).lower():
+                        exists = True
+                        break
+                    if isinstance(existing, dict) and isinstance(entry, dict) and (str(existing.get('email','')).lower() == str(entry.get('email','')).lower() or str(existing.get('local','')).lower() == str(entry.get('local','')).lower()):
+                        exists = True
+                        break
+                except Exception:
+                    continue
+
+            if not exists:
+                d.deactivated_emails.append(entry)
+            else:
+                # Already deactivated; nothing to do
+                return jsonify({"message": "Email already deactivated"}), 200
+
+        # delete only the targeted Email row
+        db.session.delete(target)
+        db.session.commit()
+        return jsonify({"message": "Email deactivated"}), 200
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), 500
+'''
 import random
 import string
 import hmac

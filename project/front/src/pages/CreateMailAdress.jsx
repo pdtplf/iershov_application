@@ -44,7 +44,7 @@ export default function CreateMailAddress() {
         await axios.post(
           `${API_URL}/emails`,
           {
-            temp: [email, service, serviceUrl, signature]
+            data: [email, service, serviceUrl, signature]
           },
           {
             headers: {

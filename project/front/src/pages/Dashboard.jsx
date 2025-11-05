@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
-import { fetchEmails, fetchMain } from '../api';
+import { useNavigate } from 'react-router-dom';
+import { fetchEmails, fetchMain, deactivateEmail } from '../api.jsx';
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [mainEmail, setMainEmail] = useState('');
   const [emails, setEmails] = useState([]);
   const [descs, setDesc] = useState([]);
   const [urls, setUrls] = useState([]);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
-    window.location.href = '/login';
+    navigate('/login');
   };
 
   useEffect(() => {
@@ -18,16 +21,12 @@ export default function Dashboard() {
       try {
         const main = await fetchMain(token);
         setMainEmail(main.main);
-
         const data = await fetchEmails(token);
-        const extractedEmails = data.emails.map(item => item.temp[0]);
-        setEmails(extractedEmails.slice(0));
-
-        const extractedDescriptions = data.emails.map(item => item.temp[1]);
-        setDesc(extractedDescriptions.slice(0));
-
-        const extractedUrls = data.emails.map(item => item.temp[2]);
-        setUrls(extractedUrls.slice(0));
+        // API now returns items as { uuid, data }
+        setEmails(data.emails || []);
+        // clear descs/urls if present — derived from data when rendering
+        setDesc([]);
+        setUrls([]);
       } catch (error) {
         console.error('Error fetching emails:', error);
       }
@@ -71,6 +70,29 @@ export default function Dashboard() {
       <div className="form-section">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h1>w3r4kl emails</h1>
+          {/* Burger menu */}
+          <div style={{ position: 'relative' }}>
+            <button
+              aria-label="Открыть меню"
+              className="button"
+              onClick={() => setMenuOpen(open => !open)}
+              style={{ padding: '0.5rem', minWidth: '40px' }}
+            >
+              <div style={{ width: '20px', height: '2px', background: '#333', marginBottom: '4px' }} />
+              <div style={{ width: '20px', height: '2px', background: '#333', marginBottom: '4px' }} />
+              <div style={{ width: '20px', height: '2px', background: '#333' }} />
+            </button>
+
+            {menuOpen && (
+              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', background: 'white', border: '1px solid #ddd', borderRadius: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', zIndex: 50 }}>
+                <button onClick={() => { setMenuOpen(false); navigate('/help'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Помощь</button>
+                <button onClick={() => { setMenuOpen(false); navigate('/active'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Активные адреса</button>
+                <button onClick={() => { setMenuOpen(false); navigate('/deactivated'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Отключенные адреса</button>
+                <button onClick={() => { setMenuOpen(false); navigate('/change-main'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Сменить основную почту</button>
+                <button onClick={() => { setMenuOpen(false); navigate('/delete-account'); }} style={{ display: 'block', padding: '0.75rem 1.25rem', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', color: 'red' }}>Удалить аккаунт</button>
+              </div>
+            )}
+          </div>
         </div>
         
         <div style={{ marginTop: '2rem' }}>
@@ -82,30 +104,57 @@ export default function Dashboard() {
               <tr>
                 <th style={{ border: '0px solid #ddd', padding: '8px', textAlign: 'left' }}>Адрес</th>
                 <th style={{ border: '0px solid #ddd', padding: '8px', textAlign: 'left' }}>Сервис</th>
+                <th style={{ border: '0px solid #ddd', padding: '8px', textAlign: 'left' }}>Действия</th>
               </tr>
             </thead>
             <tbody>
-              {emails.map((email, index) => (
-                <tr key={email}>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>
-                    {email}@w3r4kl.ru
-                  </td>
-                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>
-                    {descs[index] || 'Нет описания'}
-                    <br />
-                    {urls[index] && (
-                      <a 
-                        href={urls[index].startsWith('http://') || urls[index].startsWith('https://') ? urls[index] : `https://${urls[index]}`} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
-                        style={{ fontSize: '0.8rem' }}
-                      >
-                        {urls[index]}
-                      </a>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {emails.map((item, index) => {
+                    const d = item.data || [];
+                    const local = Array.isArray(d) && d.length > 0 ? d[0] : (d?.email || d?.local || '');
+                    const desc = Array.isArray(d) && d.length > 1 ? d[1] : (d?.service || d?.name || '');
+                    const url = Array.isArray(d) && d.length > 2 ? d[2] : (d?.serviceUrl || d?.url || '');
+                    return (
+                    <tr key={item.uuid || index}>
+                      <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                        {local}@w3r4kl.ru
+                      </td>
+                      <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                        {desc || 'Нет описания'}
+                        <br />
+                        {url && (
+                          <a 
+                            href={url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            style={{ fontSize: '0.8rem' }}
+                          >
+                            {url}
+                          </a>
+                        )}
+                      </td>
+                      <td style={{ border: '1px solid #ddd', padding: '8px' }}>
+                        <button
+                          className="button danger"
+                          onClick={async () => {
+                            const confirmed = window.confirm(`Деактивировать адрес ${local}@w3r4kl.ru ?`);
+                            if (!confirmed) return;
+                            const token = localStorage.getItem('token');
+                            try {
+                              await deactivateEmail(token, d);
+                              // remove the item from local state by uuid
+                              setEmails(prev => prev.filter(p => p.uuid !== item.uuid));
+                            } catch (err) {
+                              console.error(err);
+                              window.alert('Не удалось деактивировать адрес. Попробуйте снова.');
+                            }
+                          }}
+                        >
+                          Деактивировать
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                  })}
             </tbody>
           </table>
 
